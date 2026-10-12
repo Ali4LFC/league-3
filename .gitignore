@@ -25,6 +25,14 @@ dist-ssr
 
 .vercel
 
+# Environment
+.env
+.env.local
+
+# Capacitor native platforms (generated via `npx cap add android`)
+android/
+ios/
+
 # PWA / build
 dev-dist
 *.local

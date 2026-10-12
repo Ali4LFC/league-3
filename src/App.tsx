@@ -1,11 +1,19 @@
 import { useState } from 'react'
 import League from './League'
 import QuickGame from './QuickGame'
+import { haptic } from './telegram'
 
 type Tab = 'quick' | 'league'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('quick')
+
+  const switchTab = (t: Tab) => {
+    if (t !== tab) {
+      haptic.selection()
+      setTab(t)
+    }
+  }
 
   return (
     <div className="min-h-screen flex flex-col max-w-lg mx-auto">
@@ -35,7 +43,7 @@ export default function App() {
       <nav className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-charcoal/95 backdrop-blur border-t-2 border-line px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5">
         <div className="flex gap-1.5 bg-surface border border-line p-1 rounded-none">
           <button
-            onClick={() => setTab('quick')}
+            onClick={() => switchTab('quick')}
             className={`flex-1 py-2.5 text-sm font-bold transition-all ${
               tab === 'quick' ? 'bg-lime text-charcoal' : 'text-muted hover:text-ink'
             }`}
@@ -43,7 +51,7 @@ export default function App() {
             ⚡ Быстрая
           </button>
           <button
-            onClick={() => setTab('league')}
+            onClick={() => switchTab('league')}
             className={`flex-1 py-2.5 text-sm font-bold transition-all ${
               tab === 'league' ? 'bg-lime text-charcoal' : 'text-muted hover:text-ink'
             }`}

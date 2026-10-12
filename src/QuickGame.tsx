@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { LocalNotifications } from '@capacitor/local-notifications'
 import { useLocalStorage, uid } from './store'
 import type { QuickState, QuickTeam, QuickGameRecord, GoalEvent } from './types'
+import { haptic } from './telegram'
 
 const GAME_DURATION = 7 * 60
 const WIN_GOALS = 2
 const REST_STREAK = 3 // команда идёт на отдых после стольких побед подряд
+
+// Нативные уведомления (Capacitor) — срабатывают даже когда приложение закрыто
+const IS_NATIVE = Capacitor.isNativePlatform()
+const NOTIF_ID_MINUTE = 1001
+const NOTIF_ID_FINAL = 1002
+const NOTIF_ID_END = 1003
 
 const DEFAULT_TEAMS: QuickTeam[] = [
   { id: 'blue', name: 'Синие', color: '#3b82f6' },
@@ -65,7 +74,9 @@ function computeQuickStandings(
       scoreB: liveGame.scoreB,
       winnerId: null,
       loserId: null,
-      isDraw: liveGame.scoreA === liveGame.scoreB,
+      // Ничья в лайв-игре только если обе команды забили хотя бы по голу
+      // (0:0 на старте или после сбрасывания счёта не должно давать очков)
+      isDraw: liveGame.scoreA === liveGame.scoreB && liveGame.scoreA > 0,
       oldTeamLeft: false,
       forcedRest: false,
       duration: 0,
@@ -141,8 +152,9 @@ export default function QuickGame() {
     } catch (e) { /* audio unavailable */ }
   }
 
-  // Показать уведомление через Service Worker (работает и когда вкладка в фоне)
+  // Показать уведомление через Service Worker (только веб-версия)
   const showNotification = async (title: string, body: string, tag: string, silent = false) => {
+    if (IS_NATIVE) return
     if (!('Notification' in window) || Notification.permission !== 'granted') return
     try {
       const reg = await navigator.serviceWorker?.getRegistration()
@@ -158,6 +170,8 @@ export default function QuickGame() {
     showNotification(tone === 'danger' ? '🚨 League 3' : '⏱ League 3', text, text)
     // Звук
     beep(tone === 'danger' ? 880 : 660, 250, beepCount)
+    // Виброотклик в Telegram
+    haptic.notification(tone === 'danger' ? 'warning' : 'success')
     // Визуальный баннер
     if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current)
     setBanner({ text, tone })
@@ -170,9 +184,9 @@ export default function QuickGame() {
     notifiedFinalRef.current = false
   }
 
-  // Отслеживание порогов таймера
+  // Отслеживание порогов таймера (только для веб-версии; в нативе — слушатель localNotificationReceived)
   useEffect(() => {
-    if (!isRunning) return
+    if (!isRunning || IS_NATIVE) return
     if (timerSeconds === 60 && !notifiedMinuteRef.current) {
       notifiedMinuteRef.current = true
       fireAlert('Осталась минута!', 'warning', 2)
@@ -183,16 +197,94 @@ export default function QuickGame() {
     }
   }, [timerSeconds, isRunning])
 
+  // В нативном приложении: показываем баннер+бип когда уведомление приходит в foreground
+  useEffect(() => {
+    if (!IS_NATIVE) return
+    let handle: { remove: () => Promise<void> } | null = null
+    LocalNotifications.addListener('localNotificationReceived', (notification) => {
+      const id = notification.id
+      if (id === NOTIF_ID_MINUTE) fireAlert('Осталась минута!', 'warning', 2)
+      else if (id === NOTIF_ID_FINAL) fireAlert('Последняя атака!', 'danger', 3)
+      else if (id === NOTIF_ID_END) fireAlert('Время вышло!', 'danger', 4)
+    }).then((h) => { handle = h })
+    return () => { handle?.remove() }
+  }, [])
+
+
   // Очистка баннера при размонтировании
   useEffect(() => {
     return () => { if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current) }
   }, [])
 
+  // Отменять все запланированные нативные уведомления при остановке таймера (любым способом)
+  useEffect(() => {
+    if (!isRunning) cancelNativeNotifications()
+  }, [isRunning])
+
   // Запрос разрешения на уведомления при первом нажатии Старт
   const requestNotifyPermission = () => {
+    if (IS_NATIVE) {
+      LocalNotifications.requestPermissions().catch(() => {})
+      return
+    }
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {})
     }
+  }
+
+  // Расписать нативные уведомления таймера на определённые моменты времени
+  const scheduleNativeNotifications = async (endTime: number) => {
+    if (!IS_NATIVE) return
+    const now = Date.now()
+    const notifications: any[] = []
+
+    // Осталась минута
+    const minuteAt = endTime - 60_000
+    if (minuteAt > now) {
+      notifications.push({
+        id: NOTIF_ID_MINUTE,
+        title: '⏱ League 3',
+        body: 'Осталась минута!',
+        schedule: { at: new Date(minuteAt) }
+      })
+    }
+    // Последняя атака
+    const finalAt = endTime - 15_000
+    if (finalAt > now) {
+      notifications.push({
+        id: NOTIF_ID_FINAL,
+        title: '🚨 League 3',
+        body: 'Последняя атака!',
+        schedule: { at: new Date(finalAt) }
+      })
+    }
+    // Конец игры
+    notifications.push({
+      id: NOTIF_ID_END,
+      title: '🏁 League 3',
+      body: 'Время вышло!',
+      schedule: { at: new Date(endTime) }
+    })
+
+    if (notifications.length) {
+      try {
+        await LocalNotifications.schedule({ notifications })
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  // Отменить все запланированные уведомления таймера
+  const cancelNativeNotifications = async () => {
+    if (!IS_NATIVE) return
+    try {
+      await LocalNotifications.cancel({
+        notifications: [
+          { id: NOTIF_ID_MINUTE },
+          { id: NOTIF_ID_FINAL },
+          { id: NOTIF_ID_END }
+        ]
+      })
+    } catch (e) { /* ignore */ }
   }
 
   // Timer tick — по реальному времени (Date.now), чтобы не отставать в фоне
@@ -204,6 +296,7 @@ export default function QuickGame() {
     }
     if (endTimeRef.current == null) {
       endTimeRef.current = Date.now() + timerSeconds * 1000
+      scheduleNativeNotifications(endTimeRef.current)
     }
     const tick = () => {
       setState((prev) => {
@@ -241,8 +334,9 @@ export default function QuickGame() {
     }
   }, [isRunning, setState])
 
-  // Sticky-уведомление с оставшимся временем (обновляется каждые ~10 сек)
+  // Sticky-уведомление с оставшимся временем (только веб-версия)
   useEffect(() => {
+    if (IS_NATIVE) return
     if (!isRunning) {
       if (stickyNotifyRef.current) { clearInterval(stickyNotifyRef.current); stickyNotifyRef.current = null }
       // закрываем sticky-уведомление при остановке
@@ -262,6 +356,7 @@ export default function QuickGame() {
   }, [isRunning, timerSeconds])
 
   const addGoal = (teamId: string) => {
+    haptic.impact('heavy')
     setState((prev) => {
       if (!prev.isRunning) return prev
       const goal: GoalEvent = { teamId, minute: Math.floor((GAME_DURATION - prev.timerSeconds) / 60) + 1, timestamp: Date.now() }
@@ -276,19 +371,23 @@ export default function QuickGame() {
   }
 
   const removeLastGoal = () => {
+    haptic.impact('light')
     setShakeRemove((n) => n + 1)
     setState((prev) => ({ ...prev, goals: prev.goals.slice(0, -1) }))
   }
 
   const toggleTimer = () => {
+    haptic.impact('medium')
     setState((prev) => {
       if (!prev.isRunning) {
         requestNotifyPermission()
         resetAlertFlags()
         endTimeRef.current = Date.now() + prev.timerSeconds * 1000
+        scheduleNativeNotifications(endTimeRef.current)
       } else {
         // на паузе сбрасываем endTime, чтобы при старте пересчитать по текущему timerSeconds
         endTimeRef.current = null
+        cancelNativeNotifications()
       }
       return { ...prev, isRunning: !prev.isRunning }
     })
