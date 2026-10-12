@@ -155,7 +155,7 @@ export default function QuickGame() {
   }
 
   const fireAlert = (text: string, tone: 'warning' | 'danger', beepCount: number) => {
-    showNotification(tone === 'danger' ? '🚨 OZMZ Football' : '⏱ OZMZ Football', text, text)
+    showNotification(tone === 'danger' ? '🚨 League 3' : '⏱ League 3', text, text)
     // Звук
     beep(tone === 'danger' ? 880 : 660, 250, beepCount)
     // Визуальный баннер
@@ -254,7 +254,7 @@ export default function QuickGame() {
       return
     }
     const update = () => {
-      showNotification('⏱ OZMZ Football', `Осталось: ${fmtTime(timerSeconds)}`, 'timer-sticky', true)
+      showNotification('⏱ League 3', `Осталось: ${fmtTime(timerSeconds)}`, 'timer-sticky', true)
     }
     update()
     stickyNotifyRef.current = window.setInterval(update, 10000)

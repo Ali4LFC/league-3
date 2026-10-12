@@ -15,7 +15,7 @@ export default function App() {
           <div>
             <div className="text-[10px] uppercase tracking-[0.3em] text-muted font-semibold">Season 25/26</div>
             <h1 className="font-display font-black text-3xl leading-none text-ink/30 tracking-tightest">
-              OZMZ Football
+              League 3
             </h1>
           </div>
           <div className="flex items-center gap-1.5">

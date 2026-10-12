@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons.svg'],
       manifest: {
-        name: 'OZMZ Football',
-        short_name: 'OZMZ',
+        name: 'League 3',
+        short_name: 'League 3',
         description: 'Турнирная таблица и быстрые игры',
         theme_color: '#161616',
         background_color: '#161616',
